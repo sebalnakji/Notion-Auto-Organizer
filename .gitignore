@@ -1,0 +1,28 @@
+# 가상환경
+.venv/
+venv/
+env/
+
+# DB (API 키 등 민감 정보 포함)
+data/
+
+# 로그
+logs/
+
+# 환경변수
+.env
+
+# Streamlit 캐시
+.streamlit/cache/
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# GitHub 임시 클론 디렉토리
+/tmp/nao_github_*
+
+# IDE
+.vscode/
+.idea/
