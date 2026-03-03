@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from git import Repo, InvalidGitRepositoryError
 from database.schema import load_prompt, get_setting
+from services.concept import save_draft, delete_draft
 
 token_logger = logging.getLogger('token_usage')
 from services.llm import BaseLLMClient
@@ -216,6 +217,7 @@ class GithubService:
         on_progress: callable = None,
         on_large_file: callable = None,
         session_name: str = "",
+        session_id: str = "",
         type_id: str = "github",
     ) -> tuple[str, list[FileStatus]]:
         """
@@ -280,6 +282,8 @@ class GithubService:
                 self.llm, repo_url, dir_structure, all_statuses, system_prompt
             )
 
+            if session_id:
+                save_draft(session_id, final_doc)
             token_logger.info("[TOKEN] type=%s session=%s files=%d", type_id, session_name or repo_url.split("/")[-1], len(all_statuses))
             return final_doc, all_statuses
 
@@ -292,23 +296,39 @@ class GithubService:
     def chat(
         self,
         user_input: str,
-        history: list[dict] | None = None,
+        session_id: str = "",
+        type_id: str = "github",
     ) -> str:
-        """분석 완료 후 추가 대화 (수정/보완 요청)"""
-        history = history or []
-        messages = [{"role": "system", "content": load_prompt("github")}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_input})
-        return self.llm.chat(messages)
+        """분석 완료 후 추가 대화 (draft 기반 수정)"""
+        from services.concept import load_draft, save_draft
+        current_doc = load_draft(session_id) if session_id else ""
+        user_content = f"현재 문서:\n\n{current_doc}\n\n---\n수정 요청: {user_input}" if current_doc else user_input
+        messages = [
+            {"role": "system", "content": load_prompt(type_id)},
+            {"role": "user", "content": user_content},
+        ]
+        result = self.llm.chat(messages)
+        if session_id:
+            save_draft(session_id, result)
+        return result
 
     def stream(
         self,
         user_input: str,
-        history: list[dict] | None = None,
+        session_id: str = "",
+        type_id: str = "github",
     ):
-        """분석 완료 후 추가 대화 스트리밍"""
-        history = history or []
-        messages = [{"role": "system", "content": load_prompt("github")}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_input})
-        yield from self.llm.stream(messages)
+        """분석 완료 후 추가 대화 스트리밍 (draft 기반 수정)"""
+        from services.concept import load_draft, save_draft
+        current_doc = load_draft(session_id) if session_id else ""
+        user_content = f"현재 문서:\n\n{current_doc}\n\n---\n수정 요청: {user_input}" if current_doc else user_input
+        messages = [
+            {"role": "system", "content": load_prompt(type_id)},
+            {"role": "user", "content": user_content},
+        ]
+        result = ""
+        for chunk in self.llm.stream(messages):
+            result += chunk
+            yield chunk
+        if session_id:
+            save_draft(session_id, result)

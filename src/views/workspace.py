@@ -229,22 +229,33 @@ def render():
                 llm = get_llm_client(provider)
 
                 if base_type == "github" and len(st.session_state.chat_history) == 1:
+                    # 첫 메시지: 깃허브 레포 분석
                     service = GithubService(llm)
                     with st.spinner("레포지토리 분석 중..."):
                         result, _ = service.analyze(
                             repo_url=st.session_state.repo_url,
+                            session_id=session_id,
                             session_name=st.session_state.session_name,
                             type_id=active_type,
                         )
                     with st.chat_message("assistant"):
                         st.markdown(result)
+                elif base_type == "github":
+                    # 이후 메시지: draft 기반 수정
+                    service = GithubService(llm)
+                    with st.chat_message("assistant"):
+                        result = st.write_stream(service.stream(
+                            user_input=user_input.strip(),
+                            session_id=session_id,
+                            type_id=active_type,
+                        ))
                 else:
-                    history_for_llm = st.session_state.chat_history[:-1]
+                    # 개념/파일/연구 타입: draft 기반
                     service = ConceptService(llm)
                     with st.chat_message("assistant"):
                         result = st.write_stream(service.stream(
                             user_input=user_input.strip(),
-                            history=history_for_llm,
+                            session_id=session_id,
                             session_name=st.session_state.session_name,
                             type_id=active_type,
                         ))
@@ -260,17 +271,15 @@ def render():
 
         # ── Notion 업로드 ────────────────────────────────────────────────────
         if upload:
-            last_assistant = next(
-                (m["content"] for m in reversed(st.session_state.chat_history) if m["role"] == "assistant"),
-                None,
-            )
-            if not last_assistant:
+            from services.concept import load_draft
+            draft = load_draft(st.session_state.get("session_id", ""))
+            if not draft:
                 st.warning("업로드할 내용이 없습니다.")
             else:
                 try:
                     page_id = get_page_id(st.session_state.get("notion_page_override") or None)
                     with st.spinner("Notion에 업로드 중..."):
-                        url = upload_to_notion(last_assistant, st.session_state.get("session_name", "정리 문서"), page_id)
+                        url = upload_to_notion(draft, st.session_state.get("session_name", "정리 문서"), page_id)
                     st.success(f"업로드 완료! [Notion에서 보기]({url})")
                 except Exception as e:
                     st.error(f"업로드 실패: {e}")

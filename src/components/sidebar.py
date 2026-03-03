@@ -1,6 +1,7 @@
 import uuid
 import streamlit as st
 from database.schema import get_connection, auto_session_name
+from services.concept import delete_draft
 
 
 def _get_sessions(task_type: str) -> list:
@@ -52,6 +53,7 @@ def _delete_session(session_id: str):
     conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
     conn.commit()
     conn.close()
+    delete_draft(session_id)
 
 
 def render(active_type: str):
