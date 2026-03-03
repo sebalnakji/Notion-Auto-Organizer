@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import streamlit as st
 from database.schema import initialize_db, setup_logging, get_setting, get_available_llm_providers
 

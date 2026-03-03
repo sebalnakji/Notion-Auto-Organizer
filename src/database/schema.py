@@ -3,6 +3,7 @@ import logging
 import logging.config
 import yaml
 from pathlib import Path
+from cryptography.fernet import Fernet
 
 # 로깅 설정
 def setup_logging():
@@ -20,6 +21,43 @@ logger = logging.getLogger(__name__)
 
 # DB 경로: 프로젝트 루트/data/nao.db
 DB_PATH = Path(__file__).parents[2] / "data" / "nao.db"
+
+# 암호화 키 파일 경로
+SECRET_KEY_PATH = Path(__file__).parents[2] / ".secret.key"
+
+# 암호화 대상 키 목록
+_ENCRYPT_KEYS = {
+    "openai_api_key",
+    "anthropic_api_key",
+    "google_api_key",
+    "notion_api_key",
+    "github_token",
+}
+
+
+def _get_fernet() -> Fernet:
+    """암호화 키 로드 또는 신규 생성."""
+    if SECRET_KEY_PATH.exists():
+        key = SECRET_KEY_PATH.read_bytes()
+    else:
+        key = Fernet.generate_key()
+        SECRET_KEY_PATH.write_bytes(key)
+        logger.info("[DB] 암호화 키 생성 완료 - 경로: %s", SECRET_KEY_PATH)
+    return Fernet(key)
+
+
+def _encrypt(value: str) -> str:
+    """값 암호화 후 문자열 반환."""
+    return _get_fernet().encrypt(value.encode()).decode()
+
+
+def _decrypt(value: str) -> str:
+    """암호화된 값 복호화. 실패 시 원본 반환 (기존 평문 데이터 호환)."""
+    try:
+        return _get_fernet().decrypt(value.encode()).decode()
+    except Exception:
+        return value
+
 
 # 기본 타입 (수정/삭제 불가)
 DEFAULT_TASK_TYPES = [
@@ -135,14 +173,17 @@ def initialize_db():
 
 
 def get_setting(key: str) -> str:
-    """settings 테이블에서 단일 값 조회. 없으면 빈 문자열 반환."""
+    """settings 테이블에서 단일 값 조회. 민감 키는 복호화하여 반환."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = cursor.fetchone()
         conn.close()
-        return row["value"] if row else ""
+        if not row:
+            return ""
+        value = row["value"]
+        return _decrypt(value) if key in _ENCRYPT_KEYS and value else value
     except Exception as e:
         logger.error("[DB] 설정 조회 실패 - key: %s, 오류: %s", key, e)
         return ""
@@ -162,13 +203,14 @@ def set_setting(key: str, value: str) -> bool:
     """settings 테이블에 값 저장 (upsert). 성공 시 True 반환."""
     try:
         conn = get_connection()
+        store_value = _encrypt(value) if key in _ENCRYPT_KEYS and value else value
         conn.execute(
             """INSERT INTO settings (key, value, updated_at)
                VALUES (?, ?, datetime('now', 'localtime'))
                ON CONFLICT(key) DO UPDATE SET
                  value = excluded.value,
                  updated_at = excluded.updated_at""",
-            (key, value),
+            (key, store_value),
         )
         conn.commit()
         conn.close()

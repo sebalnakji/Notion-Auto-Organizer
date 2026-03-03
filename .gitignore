@@ -6,6 +6,9 @@ env/
 # DB (API 키 등 민감 정보 포함)
 data/
 
+# 암호화 키
+.secret.key
+
 # 로그
 logs/
 
